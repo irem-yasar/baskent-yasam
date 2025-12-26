@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { logout, getCurrentUser } from "../services/authService";
 
@@ -6,8 +6,13 @@ const InstructorDashboard: React.FC = () => {
   const navigate = useNavigate();
   const user = getCurrentUser();
 
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const openLogoutModal = () => setShowLogoutModal(true);
+  const closeLogoutModal = () => setShowLogoutModal(false);
+
   const handleLogout = () => {
     logout();
+    setShowLogoutModal(false);
     navigate("/");
   };
 
@@ -20,9 +25,11 @@ const InstructorDashboard: React.FC = () => {
             Başkent Yaşam – Öğretim Elemanı
           </h1>
           <div className="flex items-center gap-4">
-            <span className="text-sm">Hoş geldiniz, {user?.name || "Öğretim Elemanı"}</span>
+            <span className="text-sm">
+              Hoş geldiniz, {user?.name || "Öğretim Elemanı"}
+            </span>
             <button
-              onClick={handleLogout}
+              onClick={openLogoutModal}
               className="hover:underline text-sm"
             >
               Çıkış yap
@@ -47,7 +54,10 @@ const InstructorDashboard: React.FC = () => {
 
           {/* Diğerleri (aynı) */}
           <div className="bg-white rounded-2xl border p-6 shadow">
-            Kütüphane Doluluk
+            <h3 className="text-lg font-semibold mb-2">Kütüphane Doluluk</h3>
+            <p className="text-slate-600">
+              Kütüphanenin doluluk oranını görüntüleyin.
+            </p>
           </div>
 
           <button
@@ -61,10 +71,51 @@ const InstructorDashboard: React.FC = () => {
           </button>
 
           <div className="bg-white rounded-2xl border p-6 shadow">
-            Otopark Durumu
+            <h3 className="text-lg font-semibold mb-2">Otopark Durumu</h3>
+            <p className="text-slate-600">
+              Otoparkın doluluk oranını görüntüleyin.
+            </p>
           </div>
         </div>
       </main>
+
+      {showLogoutModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          onClick={closeLogoutModal}
+        >
+          <div
+            className="bg-white rounded-lg p-6 w-full max-w-md mx-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="logout-title" className="text-lg font-semibold mb-4">
+              Çıkış Yap
+            </h2>
+            <p className="text-slate-600 mb-6">
+              Çıkış yapmak istediğinizden emin misiniz?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={closeLogoutModal}
+                className="px-4 py-2 rounded-md border"
+              >
+                İptal
+              </button>
+              <button
+                onClick={() => {
+                  handleLogout();
+                }}
+                className="px-4 py-2 rounded-md bg-[#d71920] text-white"
+              >
+                Çıkış Yap
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

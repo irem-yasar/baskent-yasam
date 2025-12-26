@@ -30,6 +30,14 @@ export interface ApiError {
   status?: number;
 }
 
+export interface RegisterRequest {
+  name: string;
+  email: string;
+  password: string;
+  role: 'student' | 'instructor';
+  studentNo?: string | null;
+}
+
 // Login işlemi
 export const login = async (credentials: LoginRequest): Promise<LoginResponse> => {
   try {
@@ -50,7 +58,8 @@ export const login = async (credentials: LoginRequest): Promise<LoginResponse> =
     const backendData = response.data;
     
     // Role'ü küçük harfe çevir ve normalize et
-    const normalizedRole = backendData.role.toLowerCase() as 'student' | 'instructor';
+    const roleLower = backendData.role.toLowerCase();
+    const normalizedRole = roleLower === 'teacher' || roleLower === 'instructor' ? 'instructor' : 'student';
     
     // Frontend formatına dönüştür
     const loginResponse: LoginResponse = {
@@ -74,6 +83,49 @@ export const login = async (credentials: LoginRequest): Promise<LoginResponse> =
     console.error('Login error:', error.response?.data); // Debug için
     throw {
       message: error.response?.data?.message || error.response?.data?.error || 'Giriş yapılırken bir hata oluştu',
+      status: error.response?.status,
+    } as ApiError;
+  }
+};
+
+// Kayıt işlemi
+export const register = async (payload: RegisterRequest): Promise<LoginResponse> => {
+  try {
+    const requestBody = {
+      name: payload.name,
+      email: payload.email,
+      password: payload.password,
+      role: payload.role === 'instructor' ? 'Teacher' : 'Student', // Backend UserRole enum uses Teacher/Student
+      studentNo: payload.studentNo || null,
+    };
+
+    const response = await apiClient.post<BackendLoginResponse>('/Auth/register', requestBody);
+    const backendData = response.data;
+
+    const roleLower = backendData.role.toLowerCase();
+    const normalizedRole = roleLower === 'teacher' || roleLower === 'instructor' ? 'instructor' : 'student';
+
+    const loginResponse: LoginResponse = {
+      token: backendData.token,
+      user: {
+        id: backendData.userId.toString(),
+        username: backendData.name,
+        role: normalizedRole as 'student' | 'instructor',
+        name: backendData.name,
+      },
+    };
+
+    // Token ve kullanıcı bilgilerini localStorage'a kaydet
+    if (loginResponse.token) {
+      localStorage.setItem('token', loginResponse.token);
+      localStorage.setItem('user', JSON.stringify(loginResponse.user));
+    }
+
+    return loginResponse;
+  } catch (error: any) {
+    console.error('Register error:', error.response?.data);
+    throw {
+      message: error.response?.data?.message || error.response?.data?.error || 'Kayıt yapılırken bir hata oluştu',
       status: error.response?.status,
     } as ApiError;
   }
