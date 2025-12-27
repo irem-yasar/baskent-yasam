@@ -27,7 +27,7 @@ const TeacherAppointmentPage: React.FC = () => {
         const data = await getTeachers();
         setTeachers(data);
       } catch (err) {
-        console.error('Öğretmenler yüklenirken hata:', err);
+        console.error("Öğretmenler yüklenirken hata:", err);
         // Hata olsa bile devam et, manuel giriş yapılabilir
       } finally {
         setLoadingTeachers(false);
@@ -50,9 +50,35 @@ const TeacherAppointmentPage: React.FC = () => {
           : "Sınav kağıdına bakma";
 
       // Token kontrolü
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       if (!token) {
-        throw { message: "Oturum süreniz dolmuş. Lütfen tekrar giriş yapın." } as ApiError;
+        throw {
+          message: "Oturum süreniz dolmuş. Lütfen tekrar giriş yapın.",
+        } as ApiError;
+      }
+
+      // Saat validation: 09:00-17:00 arası ve 30 dk aralıklarla
+      if (!time) {
+        setError("Lütfen bir saat seçin.");
+        setLoading(false);
+        return;
+      }
+
+      const [hourStr, minuteStr] = time.split(":");
+      const hour = parseInt(hourStr, 10);
+      const minute = parseInt(minuteStr, 10);
+
+      if (
+        hour < 9 ||
+        hour > 17 ||
+        (hour === 17 && minute !== 0) ||
+        (minute !== 0 && minute !== 30)
+      ) {
+        setError(
+          "Lütfen 09:00 ile 17:00 arasında, 30 dakika aralıklarla bir saat seçin."
+        );
+        setLoading(false);
+        return;
       }
 
       // Backend artık studentId'yi JWT token'dan otomatik alıyor
@@ -67,7 +93,7 @@ const TeacherAppointmentPage: React.FC = () => {
       });
 
       alert("Randevu talebiniz başarıyla oluşturuldu!");
-      
+
       // Formu temizle
       setLecturerName("");
       setCourse("");
@@ -76,13 +102,14 @@ const TeacherAppointmentPage: React.FC = () => {
       setDate("");
       setTime("");
       setNote("");
-      
+
       // Öğrenci dashboard'una dön
       navigate("/ogrenci");
     } catch (err) {
       const apiError = err as ApiError;
       // Hata mesajını göster (validation hataları için)
-      const errorMsg = apiError.message || "Randevu oluşturulurken bir hata oluştu";
+      const errorMsg =
+        apiError.message || "Randevu oluşturulurken bir hata oluştu";
       setError(errorMsg);
       console.error("Randevu oluşturma hatası:", errorMsg);
     } finally {
@@ -243,6 +270,9 @@ const TeacherAppointmentPage: React.FC = () => {
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
+                min="09:00"
+                max="17:00"
+                step={1800}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
               />
