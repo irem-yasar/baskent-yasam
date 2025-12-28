@@ -8,7 +8,7 @@ namespace ApiProject.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Roles = "Student")]
 public class OrderController : ControllerBase
 {
     private readonly ICafeService _cafeService;

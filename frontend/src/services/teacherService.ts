@@ -5,6 +5,7 @@ export interface Teacher {
   name: string;
   role: string;
   studentNo?: string | null;
+  email?: string | null; // Email eklendi (select box'ta gösterilmek için)
 }
 
 export interface ApiError {

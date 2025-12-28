@@ -8,7 +8,7 @@ namespace ApiProject.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Roles = "Student,AcademicStaff")]
 public class AppointmentController : ControllerBase
 {
     private readonly IAppointmentService _appointmentService;
@@ -80,23 +80,35 @@ public class AppointmentController : ControllerBase
     {
         try
         {
-            var userEmail = GetCurrentUserEmail();
-            if (string.IsNullOrEmpty(userEmail))
+            // JWT token'dan UserId'yi al (email yerine - AcademicStaff için email null olabilir)
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId == null)
                 return Unauthorized("Kullanıcı bilgisi bulunamadı");
 
             var userRole = GetCurrentUserRole();
             List<Models.Appointment> appointments;
 
             // Case-insensitive role kontrolü
-            if (string.Equals(userRole, "Teacher", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(userRole, "AcademicStaff", StringComparison.OrdinalIgnoreCase))
             {
-                appointments = await _appointmentService.GetAppointmentsByTeacherEmailAsync(userEmail);
-                _logger.LogInformation("Hoca randevuları getiriliyor. Email: {Email}, Role: {Role}, Bulunan randevu sayısı: {Count}", userEmail, userRole, appointments.Count);
+                // Teacher randevularını UserId ile getir
+                appointments = await _appointmentService.GetAppointmentsByTeacherIdAsync(currentUserId.Value);
+                _logger.LogInformation("Hoca randevuları getiriliyor. UserId: {UserId}, Role: {Role}, Bulunan randevu sayısı: {Count}", 
+                    currentUserId.Value, userRole, appointments.Count);
+                
+                // DEBUG: Randevuları logla
+                foreach (var apt in appointments)
+                {
+                    _logger.LogInformation("Randevu - Id: {Id}, StudentId: {StudentId}, TeacherId: {TeacherId}, Status: {Status}", 
+                        apt.Id, apt.StudentId, apt.TeacherId, apt.Status);
+                }
             }
             else
             {
-                appointments = await _appointmentService.GetAppointmentsByStudentEmailAsync(userEmail);
-                _logger.LogInformation("Öğrenci randevuları getiriliyor. Email: {Email}, Role: {Role}, Bulunan randevu sayısı: {Count}", userEmail, userRole, appointments.Count);
+                // Student randevularını UserId ile getir
+                appointments = await _appointmentService.GetAppointmentsByStudentIdAsync(currentUserId.Value);
+                _logger.LogInformation("Öğrenci randevuları getiriliyor. UserId: {UserId}, Role: {Role}, Bulunan randevu sayısı: {Count}", 
+                    currentUserId.Value, userRole, appointments.Count);
             }
 
             var response = appointments.Select(a => MapToDto(a)).ToList();
@@ -160,6 +172,10 @@ public class AppointmentController : ControllerBase
             if (currentUserId == null)
                 return Unauthorized("Kullanıcı bilgisi bulunamadı");
 
+            // DEBUG: StudentId ve TeacherId'yi logla
+            _logger.LogInformation("StudentId from token: {StudentId}, TeacherId from request: {TeacherId}", 
+                currentUserId.Value, dto.TeacherId);
+
             var appointment = await _appointmentService.CreateAppointmentAsync(dto, currentUserId);
             return CreatedAtAction(nameof(GetAppointmentById), new { id = appointment.Id }, MapToDto(appointment));
         }
@@ -187,30 +203,59 @@ public class AppointmentController : ControllerBase
     }
 
     /// <summary>
-    /// Randevu günceller
+    /// Randevu günceller (Onayla/Reddet)
     /// </summary>
     [HttpPut("{id}")]
     public async Task<ActionResult<AppointmentResponseDto>> UpdateAppointment(int id, [FromBody] AppointmentUpdateDto dto)
     {
         try
         {
-            var appointment = await _appointmentService.UpdateAppointmentAsync(id, dto);
+            var appointment = await _appointmentService.GetAppointmentByIdAsync(id);
             if (appointment == null)
                 return NotFound($"ID: {id} olan randevu bulunamadı");
 
-            // Kullanıcının kendi randevusu olduğunu kontrol et
-            var userEmail = GetCurrentUserEmail();
+            // Kullanıcının bu randevuyu güncelleme yetkisi var mı kontrol et
+            var currentUserId = GetCurrentUserId();
             var userRole = GetCurrentUserRole();
-            if (!string.IsNullOrEmpty(userEmail) && userRole != "Admin")
+            
+            if (currentUserId == null)
+                return Unauthorized("Kullanıcı bilgisi bulunamadı");
+
+            // Admin değilse, sadece kendi randevusunu güncelleyebilir
+            if (!string.Equals(userRole, "Admin", StringComparison.OrdinalIgnoreCase))
             {
-                if (appointment.Teacher?.Email.ToLower() != userEmail.ToLower() && 
-                    appointment.Student?.Email.ToLower() != userEmail.ToLower())
+                // Hoca ise: Sadece kendi randevularını (TeacherId) güncelleyebilir
+                // Öğrenci ise: Sadece kendi randevularını (StudentId) güncelleyebilir
+                bool canUpdate = false;
+                
+                if (string.Equals(userRole, "AcademicStaff", StringComparison.OrdinalIgnoreCase))
                 {
+                    // Hoca sadece kendi randevularını onaylayabilir/reddedebilir
+                    canUpdate = appointment.TeacherId == currentUserId.Value;
+                }
+                else if (string.Equals(userRole, "Student", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Öğrenci sadece kendi randevularını güncelleyebilir (genelde iptal eder)
+                    canUpdate = appointment.StudentId == currentUserId.Value;
+                }
+
+                if (!canUpdate)
+                {
+                    _logger.LogWarning("Yetkisiz randevu güncelleme denemesi. UserId: {UserId}, Role: {Role}, AppointmentId: {AppointmentId}, TeacherId: {TeacherId}, StudentId: {StudentId}",
+                        currentUserId.Value, userRole, id, appointment.TeacherId, appointment.StudentId);
                     return Forbid("Bu randevuyu güncelleme yetkiniz yok");
                 }
             }
 
-            return Ok(MapToDto(appointment));
+            // Randevuyu güncelle
+            var updatedAppointment = await _appointmentService.UpdateAppointmentAsync(id, dto);
+            if (updatedAppointment == null)
+                return NotFound($"ID: {id} olan randevu güncellenemedi");
+
+            _logger.LogInformation("Randevu güncellendi. AppointmentId: {AppointmentId}, Status: {Status}, UserId: {UserId}, Role: {Role}",
+                id, dto.Status, currentUserId.Value, userRole);
+
+            return Ok(MapToDto(updatedAppointment));
         }
         catch (Exception ex)
         {
@@ -246,10 +291,10 @@ public class AppointmentController : ControllerBase
         {
             Id = appointment.Id,
             StudentId = appointment.StudentId,
-            StudentName = appointment.Student?.Name ?? "Bilinmiyor",
-            StudentNo = appointment.Student?.StudentNo,
+            StudentName = appointment.Student?.FullName ?? "Bilinmiyor", // FullName kullan
+            StudentNo = appointment.Student?.StaffId, // StaffId kullan
             TeacherId = appointment.TeacherId,
-            TeacherName = appointment.Teacher?.Name ?? "Bilinmiyor",
+            TeacherName = appointment.Teacher?.FullName ?? "Bilinmiyor", // FullName kullan
             Date = appointment.Date,
             Time = appointment.Time,
             Subject = appointment.Subject,

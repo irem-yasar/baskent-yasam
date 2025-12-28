@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   getInstructorAppointments,
   updateAppointmentStatus,
   Appointment,
   ApiError,
 } from "../services/appointmentService";
+import { getMySchedule, saveSchedule, ScheduleSlot, ApiError as ScheduleApiError } from "../services/scheduleService";
+import { isAuthenticated } from "../services/authService";
 
 const days = ["Pzt", "Sal", "Çar", "Per", "Cum"];
 const times = [
@@ -22,24 +24,76 @@ const times = [
 type TabType = "requests" | "myAppointments";
 
 const InstructorAppointmentManagement: React.FC = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>("requests");
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string>("");
 
+  // Token kontrolü - sayfa yüklenirken kontrol et
   useEffect(() => {
+    if (!isAuthenticated()) {
+      console.warn("Token bulunamadı, login sayfasına yönlendiriliyor...");
+      navigate("/");
+      return;
+    }
     loadAppointments();
-  }, []);
+    loadSchedule();
+  }, [navigate]);
+
+  const loadSchedule = async () => {
+    try {
+      console.log("Ders programı yükleniyor...");
+      const schedule = await getMySchedule();
+      console.log("Ders programı yüklendi:", schedule);
+      // Schedule'ı selectedSlots formatına çevir (örn: "Pzt-09.00-09.50")
+      const slots = schedule.map(s => `${s.day}-${s.timeSlot}`);
+      setSelectedSlots(slots);
+    } catch (err: any) {
+      console.error("Ders programı yüklenirken hata:", err);
+      console.error("Hata detayları:", {
+        status: err?.status,
+        message: err?.message,
+        url: err?.config?.url
+      });
+      // 401 hatası durumunda axios interceptor zaten yönlendirme yapacak
+      if (err?.status === 401) {
+        console.warn("401 hatası - axios interceptor yönlendirecek");
+        return; // Token geçersiz, interceptor yönlendirecek
+      }
+      // Diğer hatalar için sessizce devam et, kullanıcı yeni program oluşturabilir
+    }
+  };
 
   const loadAppointments = async () => {
     setLoading(true);
     setError("");
     try {
+      console.log("Randevular yükleniyor...");
       const data = await getInstructorAppointments();
+      // DEBUG: Randevuları kontrol et
+      console.log("Loaded appointments:", data.map(apt => ({
+        id: apt.id,
+        course: apt.course,
+        reason: apt.reason,
+      })));
       setAppointments(data);
-    } catch (err) {
+    } catch (err: any) {
       const apiError = err as ApiError;
+      console.error("Randevular yüklenirken hata:", err);
+      console.error("Hata detayları:", {
+        status: apiError.status,
+        message: apiError.message,
+        url: err?.config?.url
+      });
+      // 401 hatası durumunda axios interceptor zaten yönlendirme yapacak
+      if (apiError.status === 401) {
+        console.warn("401 hatası - axios interceptor yönlendirecek");
+        return; // Token geçersiz, interceptor yönlendirecek
+      }
       setError(apiError.message || "Randevular yüklenirken bir hata oluştu");
     } finally {
       setLoading(false);
@@ -58,7 +112,26 @@ const InstructorAppointmentManagement: React.FC = () => {
         return;
       }
 
-      await updateAppointmentStatus(appointmentId, status, appointment);
+      // Reddetme durumunda sebep sor
+      let rejectionReason: string | undefined = undefined;
+      if (status === "rejected") {
+        const reason = prompt(
+          "Randevuyu reddetme sebebinizi yazın:",
+          ""
+        );
+        if (reason === null) {
+          // Kullanıcı iptal etti
+          return;
+        }
+        rejectionReason = reason.trim() || undefined;
+      }
+
+      await updateAppointmentStatus(
+        appointmentId,
+        status,
+        appointment,
+        rejectionReason
+      );
       await loadAppointments(); // Listeyi yenile
     } catch (err) {
       const apiError = err as ApiError;
@@ -72,6 +145,30 @@ const InstructorAppointmentManagement: React.FC = () => {
     setSelectedSlots((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
+  };
+
+  const handleSaveSchedule = async () => {
+    setSavingSchedule(true);
+    setScheduleError("");
+    
+    try {
+      // selectedSlots'u ScheduleSlot formatına çevir
+      const slots: ScheduleSlot[] = selectedSlots.map(slot => {
+        // Format: "Pzt-09.00-09.50" -> { day: "Pzt", timeSlot: "09.00-09.50" }
+        const [day, ...timeParts] = slot.split("-");
+        const timeSlot = timeParts.join("-");
+        return { day, timeSlot };
+      });
+
+      await saveSchedule(slots);
+      alert("Ders programı başarıyla kaydedildi!");
+    } catch (err) {
+      const apiError = err as ScheduleApiError;
+      setScheduleError(apiError.message || "Ders programı kaydedilirken bir hata oluştu");
+      console.error("Ders programı kaydetme hatası:", apiError);
+    } finally {
+      setSavingSchedule(false);
+    }
   };
 
   // Pending randevular (gelen talepler)
@@ -155,21 +252,16 @@ const InstructorAppointmentManagement: React.FC = () => {
                         className="border border-slate-200 rounded-lg p-4 bg-slate-50"
                       >
                         <div className="flex justify-between items-start mb-2">
-                          <div>
+                          <div className="flex-1">
                             <p className="font-semibold text-slate-900">
                               {apt.course || "Ders belirtilmemiş"}
                             </p>
                             <p className="text-sm text-slate-600 mt-1">
-                              {apt.reason}
+                              <span className="font-medium">Görüşme sebebi:</span> {apt.reason}
                             </p>
                             <p className="text-sm text-slate-600">
                               {apt.date} - {apt.time}
                             </p>
-                            {apt.note && (
-                              <p className="text-sm text-slate-500 mt-1 italic">
-                                Not: {apt.note}
-                              </p>
-                            )}
                           </div>
                           <div className="flex gap-2">
                             <button
@@ -217,11 +309,6 @@ const InstructorAppointmentManagement: React.FC = () => {
                         <p className="text-sm text-slate-600">
                           {apt.date} - {apt.time}
                         </p>
-                        {apt.note && (
-                          <p className="text-sm text-slate-500 mt-1 italic">
-                            Not: {apt.note}
-                          </p>
-                        )}
                       </div>
                     ))
                   )}
@@ -232,9 +319,24 @@ const InstructorAppointmentManagement: React.FC = () => {
 
           {/* SAĞ TARAF – DERS PROGRAMI */}
           <section className="lg:col-span-2 bg-white rounded-xl border p-4 shadow">
-            <h2 className="text-sm font-semibold mb-3 text-center">
-              Haftalık Ders Programı
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">
+                Haftalık Ders Programı
+              </h2>
+              <button
+                onClick={handleSaveSchedule}
+                disabled={savingSchedule}
+                className="px-4 py-2 bg-[#d71920] text-white text-sm font-medium rounded-lg hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingSchedule ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+
+            {scheduleError && (
+              <div className="mb-3 bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded text-sm">
+                {scheduleError}
+              </div>
+            )}
 
             <div className="grid grid-cols-6 text-xs gap-1">
               <div />

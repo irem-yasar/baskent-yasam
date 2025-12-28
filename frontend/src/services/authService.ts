@@ -3,7 +3,7 @@ import apiClient from '../api/axios';
 export interface LoginRequest {
   username: string;
   password: string;
-  role?: 'student' | 'instructor';
+  role: 'student' | 'instructor'; // Artık zorunlu - rol kontrolü için
 }
 
 // Backend'den gelen response formatı
@@ -42,11 +42,11 @@ export interface RegisterRequest {
 export const login = async (credentials: LoginRequest): Promise<LoginResponse> => {
   try {
     // Backend'in beklediği formata göre request body'yi hazırla
-    // Backend sadece usernameOrEmail ve password bekliyor
-    // email alanını göndermiyoruz çünkü backend'de property çakışmasına neden oluyor
+    // Rol kontrolü için role bilgisini de gönder
     const requestBody = {
       usernameOrEmail: credentials.username, // Kullanıcı adı veya email
       password: credentials.password,
+      role: credentials.role, // Rol kontrolü için gönder
     };
 
     console.log('Login request body:', requestBody); // Debug için
@@ -58,8 +58,14 @@ export const login = async (credentials: LoginRequest): Promise<LoginResponse> =
     const backendData = response.data;
     
     // Role'ü küçük harfe çevir ve normalize et
+    // Backend "Student" veya "AcademicStaff" gönderiyor
     const roleLower = backendData.role.toLowerCase();
-    const normalizedRole = roleLower === 'teacher' || roleLower === 'instructor' ? 'instructor' : 'student';
+    const normalizedRole = 
+      roleLower === 'academicstaff' || 
+      roleLower === 'teacher' || 
+      roleLower === 'instructor' 
+        ? 'instructor' 
+        : 'student';
     
     // Frontend formatına dönüştür
     const loginResponse: LoginResponse = {
@@ -95,15 +101,21 @@ export const register = async (payload: RegisterRequest): Promise<LoginResponse>
       name: payload.name,
       email: payload.email,
       password: payload.password,
-      role: payload.role === 'instructor' ? 'Teacher' : 'Student', // Backend UserRole enum uses Teacher/Student
+      role: payload.role === 'instructor' ? 'Akademik Personel' : 'Öğrenci', // Backend Türkçe role bekliyor
       studentNo: payload.studentNo || null,
     };
 
     const response = await apiClient.post<BackendLoginResponse>('/Auth/register', requestBody);
     const backendData = response.data;
 
+    // Backend "Student" veya "AcademicStaff" gönderiyor
     const roleLower = backendData.role.toLowerCase();
-    const normalizedRole = roleLower === 'teacher' || roleLower === 'instructor' ? 'instructor' : 'student';
+    const normalizedRole = 
+      roleLower === 'academicstaff' || 
+      roleLower === 'teacher' || 
+      roleLower === 'instructor' 
+        ? 'instructor' 
+        : 'student';
 
     const loginResponse: LoginResponse = {
       token: backendData.token,

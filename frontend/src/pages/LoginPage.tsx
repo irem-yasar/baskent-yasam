@@ -21,11 +21,19 @@ const LoginPage: React.FC = () => {
     try {
       const response = await login({ username, password, role });
 
+      // DEBUG: Backend'den gelen response'u logla
+      console.log("LOGIN RESPONSE:", response);
+
       // Başarılı giriş sonrası role göre yönlendir
+      // Backend "Student" veya "AcademicStaff" gönderiyor, frontend normalize ediyor
       if (response.user.role === "student") {
         navigate("/ogrenci");
-      } else {
+      } else if (response.user.role === "instructor") {
         navigate("/ogretim-elemani");
+      } else {
+        // Fallback: role bilinmiyorsa varsayılan olarak öğrenci sayfasına yönlendir
+        console.warn("Bilinmeyen role:", response.user.role);
+        navigate("/ogrenci");
       }
     } catch (err) {
       const apiError = err as ApiError;
@@ -54,11 +62,19 @@ const LoginPage: React.FC = () => {
         studentNo: role === "student" ? undefined : undefined,
       });
 
+      // DEBUG: Backend'den gelen response'u logla
+      console.log("REGISTER RESPONSE:", response);
+
       // Kayıt sonrası otomatik yönlendiriliyor
+      // Backend "Student" veya "AcademicStaff" gönderiyor, frontend normalize ediyor
       if (response.user.role === "student") {
         navigate("/ogrenci");
-      } else {
+      } else if (response.user.role === "instructor") {
         navigate("/ogretim-elemani");
+      } else {
+        // Fallback: role bilinmiyorsa varsayılan olarak öğrenci sayfasına yönlendir
+        console.warn("Bilinmeyen role:", response.user.role);
+        navigate("/ogrenci");
       }
     } catch (err) {
       const apiError = err as ApiError;

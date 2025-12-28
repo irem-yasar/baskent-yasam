@@ -14,6 +14,8 @@ public interface IAppointmentService
     Task<bool> DeleteAppointmentAsync(int id);
     Task<List<Appointment>> GetAppointmentsByStudentEmailAsync(string email);
     Task<List<Appointment>> GetAppointmentsByTeacherEmailAsync(string email);
+    Task<List<Appointment>> GetAppointmentsByStudentIdAsync(int studentId);
+    Task<List<Appointment>> GetAppointmentsByTeacherIdAsync(int teacherId);
 }
 
 public class AppointmentService : IAppointmentService
@@ -48,83 +50,40 @@ public class AppointmentService : IAppointmentService
     {
         // Öğrenci ID'sini belirle (dto'dan veya currentUserId'den)
         int studentId = dto.StudentId ?? currentUserId ?? throw new ArgumentException("Öğrenci ID gereklidir.");
+        
+        // DEBUG: StudentId ve TeacherId'yi logla
+        Console.WriteLine($"StudentId from token: {studentId}");
+        Console.WriteLine($"TeacherId from request: {dto.TeacherId}");
+        
         var student = await _context.Users.FindAsync(studentId);
         if (student == null)
             throw new ArgumentException($"Öğrenci bulunamadı. StudentId: {studentId}");
 
-        // Öğretmen ID'sini belirle (dto'dan, adından veya email'inden)
+        // Öğretmen ID'sini belirle - ID ile bul (isimle arama yapma!)
         User? teacher = null;
+        
         if (dto.TeacherId.HasValue && dto.TeacherId.Value > 0)
         {
-            teacher = await _context.Users.FindAsync(dto.TeacherId.Value);
-        }
-        else if (!string.IsNullOrWhiteSpace(dto.TeacherName))
-        {
-            var teacherNameLower = dto.TeacherName.ToLower().Trim();
-            // Önce tam eşleşme dene
+            // ✅ DOĞRU: ID ile bul, RoleId ile filtrele
             teacher = await _context.Users
-                .FirstOrDefaultAsync(u => u.Name.ToLower().Trim() == teacherNameLower && u.Role == UserRole.Teacher);
+                .FirstOrDefaultAsync(u => u.Id == dto.TeacherId.Value && u.RoleId == (int)UserRole.AcademicStaff);
             
-            // Tam eşleşme yoksa, isim içinde arama yap (partial match)
             if (teacher == null)
-            {
-                teacher = await _context.Users
-                    .FirstOrDefaultAsync(u => 
-                        u.Name.ToLower().Contains(teacherNameLower) && 
-                        u.Role == UserRole.Teacher);
-            }
-            
-            // Hala bulunamadıysa, ilk kelimeyi eşleştir (örn: "Mehmet Dikmen" -> "Mehmet")
-            if (teacher == null)
-            {
-                var firstWord = teacherNameLower.Split(' ').FirstOrDefault();
-                if (!string.IsNullOrEmpty(firstWord))
-                {
-                    teacher = await _context.Users
-                        .FirstOrDefaultAsync(u => 
-                            u.Name.ToLower().Trim().StartsWith(firstWord) && 
-                            u.Role == UserRole.Teacher);
-                }
-            }
-            
-            // Hala bulunamadıysa, ters yönde arama yap
-            if (teacher == null)
-            {
-                var allTeachers = await _context.Users
-                    .Where(u => u.Role == UserRole.Teacher)
-                    .ToListAsync();
-                
-                teacher = allTeachers.FirstOrDefault(u => 
-                    teacherNameLower.Contains(u.Name.ToLower().Trim()) || 
-                    u.Name.ToLower().Trim().Contains(teacherNameLower));
-            }
+                throw new ArgumentException($"Öğretim elemanı bulunamadı. TeacherId: {dto.TeacherId} ile eşleşen AcademicStaff rolüne sahip kullanıcı bulunamadı.");
         }
-        else if (!string.IsNullOrWhiteSpace(dto.TeacherEmail))
+        else
         {
-            teacher = await _context.Users
-                .FirstOrDefaultAsync(u => u.Email.ToLower().Trim() == dto.TeacherEmail.ToLower().Trim() && u.Role == UserRole.Teacher);
+            // TeacherId zorunlu - frontend'den gönderilmeli
+            throw new ArgumentException("TeacherId gereklidir. Lütfen frontend'den teacherId gönderin.");
         }
 
-        if (teacher == null)
-        {
-            var errorMsg = "Öğretmen bulunamadı. ";
-            if (dto.TeacherId.HasValue)
-                errorMsg += $"TeacherId: {dto.TeacherId} ile eşleşen öğretmen bulunamadı. ";
-            if (!string.IsNullOrWhiteSpace(dto.TeacherName))
-                errorMsg += $"TeacherName: '{dto.TeacherName}' ile eşleşen öğretmen bulunamadı. ";
-            if (!string.IsNullOrWhiteSpace(dto.TeacherEmail))
-                errorMsg += $"TeacherEmail: '{dto.TeacherEmail}' ile eşleşen öğretmen bulunamadı. ";
-            errorMsg += "Lütfen öğretim elemanı adını kontrol edin.";
-            throw new ArgumentException(errorMsg);
-        }
-
-        if (teacher.Role != UserRole.Teacher)
-            throw new ArgumentException($"Belirtilen kullanıcı öğretmen değil. UserId: {teacher.Id}");
-
+        // DEBUG: Appointment oluşturulmadan önce değerleri logla
+        Console.WriteLine($"Creating appointment - StudentId: {studentId}, TeacherId: {teacher.Id}");
+        
         var appointment = new Appointment
         {
-            StudentId = studentId,
-            TeacherId = teacher.Id,
+            StudentId = studentId,  // 🔥 KRİTİK: JWT'den alınan StudentId
+            TeacherId = teacher.Id, // Frontend'den gelen TeacherId
             Date = dto.Date,
             Time = dto.Time,
             Subject = dto.Subject,
@@ -132,6 +91,9 @@ public class AppointmentService : IAppointmentService
             Status = AppointmentStatus.Pending,
             CreatedAt = DateTime.Now
         };
+
+        // DEBUG: Appointment entity değerlerini logla
+        Console.WriteLine($"Appointment entity - StudentId: {appointment.StudentId}, TeacherId: {appointment.TeacherId}, RequestReason: {appointment.RequestReason}");
 
         try
         {
@@ -164,7 +126,7 @@ public class AppointmentService : IAppointmentService
         // Öğrenciye bildirim gönder (SignalR ile canlı bildirim)
         await _notificationService.SendNotificationAsync(
             "Randevu Talebi Oluşturuldu",
-            $"Sayın {appointment.Student.Name}, {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatinde {appointment.Teacher.Name} hocasına randevu talebiniz oluşturulmuştur. Hocanızın onayını bekliyor.",
+            $"Sayın {appointment.Student.FullName}, {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatinde {appointment.Teacher.FullName} hocasına randevu talebiniz oluşturulmuştur. Hocanızın onayını bekliyor.",
             NotificationType.AppointmentCreated,
             appointment.Student.Email,
             appointment.Student.Id, // 🔥 KRİTİK: Öğrenci UserId
@@ -174,7 +136,7 @@ public class AppointmentService : IAppointmentService
         // Hocaya bildirim gönder (SignalR ile canlı bildirim)
         await _notificationService.SendNotificationAsync(
             "Yeni Randevu Talebi",
-            $"Sayın {appointment.Teacher.Name}, {appointment.Student.Name} ({appointment.Student.StudentNo ?? "N/A"}) öğrencisi {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatinde randevu talebinde bulunmuştur. Konu: {appointment.Subject}",
+            $"Sayın {appointment.Teacher.FullName}, {appointment.Student.FullName} ({appointment.Student.StaffId ?? "N/A"}) öğrencisi {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatinde randevu talebinde bulunmuştur. Konu: {appointment.Subject}",
             NotificationType.AppointmentCreated,
             appointment.Teacher.Email,
             appointment.Teacher.Id, // 🔥 KRİTİK: Öğretmen UserId
@@ -204,11 +166,18 @@ public class AppointmentService : IAppointmentService
         if (!string.IsNullOrEmpty(dto.Subject))
             appointment.Subject = dto.Subject;
 
+        // Reddetme sebebi güncelleme
+        if (!string.IsNullOrEmpty(dto.RejectionReason))
+        {
+            appointment.RejectionReason = dto.RejectionReason;
+        }
+
         // Durum değişikliği (Hoca onay/red işlemi)
         if (dto.Status.HasValue)
         {
             var oldStatus = appointment.Status;
             appointment.Status = dto.Status.Value;
+            appointment.UpdatedAt = DateTime.Now; // Güncelleme zamanını kaydet
 
             // Durum değişikliğinde bildirim gönder
             var notificationType = dto.Status.Value switch
@@ -229,10 +198,15 @@ public class AppointmentService : IAppointmentService
                 _ => "güncellenmiştir"
             };
 
+            // Bildirim mesajı oluştur
+            var notificationMessage = dto.Status.Value == AppointmentStatus.Rejected && !string.IsNullOrEmpty(dto.RejectionReason)
+                ? $"Sayın {appointment.Student.FullName}, {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatindeki {appointment.Teacher.FullName} hocasına olan randevu talebiniz {statusMessage}. Sebep: {dto.RejectionReason}"
+                : $"Sayın {appointment.Student.FullName}, {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatindeki {appointment.Teacher.FullName} hocasına olan randevu talebiniz {statusMessage}.";
+
             // Öğrenciye bildirim (SignalR ile canlı bildirim)
             await _notificationService.SendNotificationAsync(
                 $"Randevu Talebi {statusMessage}",
-                $"Sayın {appointment.Student.Name}, {appointment.Date:dd.MM.yyyy} tarihinde {appointment.Time:hh\\:mm} saatindeki {appointment.Teacher.Name} hocasına olan randevu talebiniz {statusMessage}.",
+                notificationMessage,
                 notificationType,
                 appointment.Student.Email,
                 appointment.Student.Id, // 🔥 KRİTİK: Öğrenci UserId
@@ -276,7 +250,27 @@ public class AppointmentService : IAppointmentService
         return await _context.Appointments
             .Include(a => a.Student)
             .Include(a => a.Teacher)
-            .Where(a => a.Teacher != null && a.Teacher.Email.ToLower().Trim() == normalizedEmail)
+            .Where(a => a.Teacher != null && a.Teacher.Email != null && a.Teacher.Email.ToLower().Trim() == normalizedEmail)
+            .OrderByDescending(a => a.Date)
+            .ToListAsync();
+    }
+
+    public async Task<List<Appointment>> GetAppointmentsByStudentIdAsync(int studentId)
+    {
+        return await _context.Appointments
+            .Include(a => a.Student)
+            .Include(a => a.Teacher)
+            .Where(a => a.StudentId == studentId)
+            .OrderByDescending(a => a.Date)
+            .ToListAsync();
+    }
+
+    public async Task<List<Appointment>> GetAppointmentsByTeacherIdAsync(int teacherId)
+    {
+        return await _context.Appointments
+            .Include(a => a.Student)
+            .Include(a => a.Teacher)
+            .Where(a => a.TeacherId == teacherId)
             .OrderByDescending(a => a.Date)
             .ToListAsync();
     }

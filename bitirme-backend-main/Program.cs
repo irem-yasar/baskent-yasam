@@ -96,7 +96,7 @@ try
             ValidIssuer = jwtSettings["Issuer"],
             ValidAudience = jwtSettings["Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
-            ClockSkew = TimeSpan.Zero
+            ClockSkew = TimeSpan.FromMinutes(5) // 5 dakika tolerans (zaman farkı için)
         };
 
         // SignalR için JWT token desteği
@@ -117,13 +117,23 @@ try
         };
     });
 
-    builder.Services.AddAuthorization();
+    builder.Services.AddAuthorization(options =>
+    {
+        // Role-based policy'ler
+        options.AddPolicy("StudentOnly", policy => policy.RequireRole("Student"));
+        options.AddPolicy("AcademicStaffOnly", policy => policy.RequireRole("AcademicStaff"));
+        options.AddPolicy("StudentOrAcademicStaff", policy => policy.RequireRole("Student", "AcademicStaff"));
+        
+        // Authorization failure durumunda 403 Forbidden döndür
+        options.FallbackPolicy = null; // Global policy yok, sadece attribute'lar kullanılacak
+    });
 
     // Servisleri Dependency Injection'a ekle
     builder.Services.AddScoped<INotificationService, NotificationService>();
     builder.Services.AddScoped<IAppointmentService, AppointmentService>();
     builder.Services.AddScoped<IAuthService, AuthService>();
     builder.Services.AddScoped<ICafeService, CafeService>();
+    builder.Services.AddScoped<ScheduleService>();
 
     // Background Service
     builder.Services.AddHostedService<OrderCleanupService>();

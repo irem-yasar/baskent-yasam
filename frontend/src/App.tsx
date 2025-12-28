@@ -6,6 +6,7 @@ import StudentDashboard from "./pages/StudentDashboard";
 import InstructorDashboard from "./pages/InstructorDashboard";
 import TeacherAppointmentPage from "./pages/TeacherAppointmentPage";
 import InstructorAppointmentManagementPage from "./pages/InstructorAppointmentManagementPage";
+import StudentAppointmentsPage from "./pages/StudentAppointmentsPage";
 import CafeteriaOrderPage from "./pages/CafeteriaOrderPage";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
 
         <Route path="/ogrenci" element={<StudentDashboard />} />
         <Route path="/randevu" element={<TeacherAppointmentPage />} />
+        <Route path="/randevularim" element={<StudentAppointmentsPage />} />
         <Route path="/ogretim-elemani" element={<InstructorDashboard />} />
         <Route
           path="/randevu-yonetimi"

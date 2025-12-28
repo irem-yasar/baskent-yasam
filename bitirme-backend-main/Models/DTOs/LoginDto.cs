@@ -12,5 +12,8 @@ public class LoginDto
     [Required(ErrorMessage = "Şifre gereklidir")]
     [JsonPropertyName("password")]
     public string Password { get; set; } = string.Empty;
+
+    [JsonPropertyName("role")]
+    public string? Role { get; set; } // Frontend'den gelen rol (opsiyonel ama kontrol için kullanılacak)
 }
 

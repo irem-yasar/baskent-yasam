@@ -1,27 +1,24 @@
 using System.ComponentModel.DataAnnotations;
-using ApiProject.Models;
+using System.Text.Json.Serialization;
 
 namespace ApiProject.Models.DTOs;
 
 public class RegisterDto
 {
-    [Required(ErrorMessage = "Ad Soyad gereklidir")]
-    [MaxLength(200)]
-    public string Name { get; set; } = string.Empty;
+    // Frontend hem username hem email gönderebilir, ikisi de optional
+    [JsonPropertyName("username")]
+    public string? Username { get; set; }
 
-    [Required(ErrorMessage = "E-posta adresi gereklidir")]
-    [EmailAddress(ErrorMessage = "Geçerli bir e-posta adresi giriniz")]
-    [MaxLength(255)]
-    public string Email { get; set; } = string.Empty;
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
 
     [Required(ErrorMessage = "Şifre gereklidir")]
     [MinLength(6, ErrorMessage = "Şifre en az 6 karakter olmalıdır")]
+    [JsonPropertyName("password")]
     public string Password { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Rol gereklidir")]
-    public UserRole Role { get; set; } = UserRole.Student;
-
-    [MaxLength(50)]
-    public string? StudentNo { get; set; }
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = string.Empty; // "Öğrenci" veya "Akademik Personel"
 }
 

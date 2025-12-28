@@ -1,13 +1,23 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createAppointment, ApiError } from "../services/appointmentService";
+import { createAppointment, getStudentAppointments, Appointment, ApiError } from "../services/appointmentService";
 import { getTeachers, Teacher } from "../services/teacherService";
+import { isAuthenticated } from "../services/authService";
 
 type Reason = "question" | "exam" | "other";
 
 const TeacherAppointmentPage: React.FC = () => {
   const navigate = useNavigate();
-  const [lecturerName, setLecturerName] = useState("");
+  
+  // Token kontrolü - sayfa yüklenirken kontrol et
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      console.warn("Token bulunamadı, login sayfasına yönlendiriliyor...");
+      navigate("/");
+      return;
+    }
+  }, [navigate]);
+  const [teacherId, setTeacherId] = useState<number | "">("");
   const [course, setCourse] = useState("");
   const [reason, setReason] = useState<Reason>("question");
   const [otherReason, setOtherReason] = useState("");
@@ -18,6 +28,10 @@ const TeacherAppointmentPage: React.FC = () => {
   const [error, setError] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
+  
+  // Randevu listesi için state'ler
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loadingAppointments, setLoadingAppointments] = useState(false);
 
   // Öğretmen listesini yükle
   useEffect(() => {
@@ -25,16 +39,44 @@ const TeacherAppointmentPage: React.FC = () => {
       setLoadingTeachers(true);
       try {
         const data = await getTeachers();
+        console.log("Teachers:", data); // DEBUG: Öğretmen listesini logla
         setTeachers(data);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Öğretmenler yüklenirken hata:", err);
-        // Hata olsa bile devam et, manuel giriş yapılabilir
+        // 401 hatası durumunda axios interceptor zaten yönlendirme yapacak
+        // Diğer hatalar için kullanıcıya bilgi ver
+        if (err?.status !== 401) {
+          setError("Öğretmen listesi yüklenemedi. Lütfen sayfayı yenileyin.");
+        }
       } finally {
         setLoadingTeachers(false);
       }
     };
     loadTeachers();
   }, []);
+
+  // Randevu listesini yükle
+  useEffect(() => {
+    loadAppointments();
+  }, []);
+
+  const loadAppointments = async () => {
+    setLoadingAppointments(true);
+    try {
+      const data = await getStudentAppointments();
+      setAppointments(data);
+    } catch (err: any) {
+      console.error("Randevular yüklenirken hata:", err);
+      // 401 hatası durumunda axios interceptor zaten yönlendirme yapacak
+      // Diğer hatalar için sessizce devam et
+      if (err?.status === 401) {
+        // Token geçersiz, interceptor yönlendirecek
+        return;
+      }
+    } finally {
+      setLoadingAppointments(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,21 +123,32 @@ const TeacherAppointmentPage: React.FC = () => {
         return;
       }
 
+      // TeacherId kontrolü
+      if (teacherId === "" || typeof teacherId !== "number" || teacherId <= 0) {
+        setError("Lütfen bir öğretim elemanı seçin.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("Submitting with teacherId:", teacherId); // DEBUG: Gönderilen ID'yi logla
+      console.log("Available teachers:", teachers); // DEBUG: Mevcut öğretmen listesini logla
+
       // Backend artık studentId'yi JWT token'dan otomatik alıyor
-      // teacherName gönderiyoruz (formdan gelen lecturerName)
+      // teacherId gönderiyoruz (formdan seçilen teacherId)
+      // "Diğer" seçeneğinde yazılan metin reason olarak gönderiliyor (finalReason içinde)
+      
       await createAppointment({
-        lecturerName,
+        teacherId: Number(teacherId),
         course,
-        reason: finalReason,
+        reason: finalReason, // "Diğer" seçeneğinde yazılan metin buraya gider
         date,
         time,
-        note: note || undefined,
       });
 
       alert("Randevu talebiniz başarıyla oluşturuldu!");
 
       // Formu temizle
-      setLecturerName("");
+      setTeacherId("");
       setCourse("");
       setReason("question");
       setOtherReason("");
@@ -103,8 +156,8 @@ const TeacherAppointmentPage: React.FC = () => {
       setTime("");
       setNote("");
 
-      // Öğrenci dashboard'una dön
-      navigate("/ogrenci");
+      // Randevu listesini yenile
+      await loadAppointments();
     } catch (err) {
       const apiError = err as ApiError;
       // Hata mesajını göster (validation hataları için)
@@ -144,12 +197,15 @@ const TeacherAppointmentPage: React.FC = () => {
         </div>
       </header>
 
-      {/* İçerik */}
-      <main className="flex-1 flex items-center justify-center px-4 py-8">
-        <form
-          onSubmit={handleSubmit}
-          className="w-full max-w-lg bg-white rounded-2xl shadow-md border border-slate-200 p-6 space-y-4"
-        >
+      {/* İçerik - 2 kolonlu layout */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Sol taraf - Randevu Talep Formu */}
+          <div>
+            <form
+              onSubmit={handleSubmit}
+              className="bg-white rounded-2xl shadow-md border border-slate-200 p-6 space-y-4"
+            >
           <h2 className="text-xl font-semibold text-slate-900 mb-2">
             Randevu Talep Formu
           </h2>
@@ -175,27 +231,26 @@ const TeacherAppointmentPage: React.FC = () => {
               </div>
             ) : teachers.length > 0 ? (
               <select
-                value={lecturerName}
-                onChange={(e) => setLecturerName(e.target.value)}
+                value={teacherId}
+                onChange={(e) => {
+                  const selectedId = e.target.value === "" ? "" : Number(e.target.value);
+                  console.log("Selected teacherId:", selectedId); // DEBUG: Seçilen ID'yi logla
+                  setTeacherId(selectedId);
+                }}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
               >
                 <option value="">Öğretim elemanı seçiniz</option>
                 {teachers.map((teacher) => (
-                  <option key={teacher.id} value={teacher.name}>
-                    {teacher.name}
+                  <option key={teacher.id} value={teacher.id}>
+                    {teacher.email || teacher.name}
                   </option>
                 ))}
               </select>
             ) : (
-              <input
-                type="text"
-                value={lecturerName}
-                onChange={(e) => setLecturerName(e.target.value)}
-                placeholder="Öğretim elemanı adı"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
+              <div className="w-full rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600">
+                Öğretmen listesi yüklenemedi. Lütfen sayfayı yenileyin.
+              </div>
             )}
           </div>
 
@@ -306,6 +361,139 @@ const TeacherAppointmentPage: React.FC = () => {
             </button>
           </div>
         </form>
+          </div>
+
+          {/* Sağ taraf - Randevularım */}
+          <div>
+            <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-6">
+              <h2 className="text-xl font-semibold text-slate-900 mb-4">
+                Randevularım
+              </h2>
+
+              {loadingAppointments ? (
+                <div className="text-center py-8">
+                  <p className="text-slate-500 text-sm">Yükleniyor...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {appointments.length === 0 ? (
+                    <p className="text-slate-500 text-sm">
+                      Henüz randevu talebiniz bulunmamaktadır.
+                    </p>
+                  ) : (
+                    <>
+                      {/* Bekleyen Randevular */}
+                      {appointments.filter(apt => apt.status === "pending").length > 0 && (
+                        <div className="mb-4">
+                          <h3 className="text-sm font-semibold text-slate-700 mb-2">
+                            Bekleyen ({appointments.filter(apt => apt.status === "pending").length})
+                          </h3>
+                          <div className="space-y-2">
+                            {appointments
+                              .filter(apt => apt.status === "pending")
+                              .map((apt) => (
+                                <div
+                                  key={apt.id}
+                                  className="border border-slate-200 rounded-lg p-3 bg-yellow-50"
+                                >
+                                  <p className="font-semibold text-slate-900 text-sm">
+                                    {apt.course || "Ders belirtilmemiş"}
+                                  </p>
+                                  <p className="text-xs text-slate-600 mt-1">
+                                    {apt.reason}
+                                  </p>
+                                  <p className="text-xs text-slate-600">
+                                    {new Date(apt.date).toLocaleDateString("tr-TR")} - {apt.time}
+                                  </p>
+                                  <span className="inline-block mt-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded">
+                                    Beklemede
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Onaylanan Randevular */}
+                      {appointments.filter(apt => apt.status === "approved").length > 0 && (
+                        <div className="mb-4">
+                          <h3 className="text-sm font-semibold text-slate-700 mb-2">
+                            Onaylanan ({appointments.filter(apt => apt.status === "approved").length})
+                          </h3>
+                          <div className="space-y-2">
+                            {appointments
+                              .filter(apt => apt.status === "approved")
+                              .map((apt) => (
+                                <div
+                                  key={apt.id}
+                                  className="border border-slate-200 rounded-lg p-3 bg-green-50"
+                                >
+                                  <p className="font-semibold text-slate-900 text-sm">
+                                    {apt.course || "Ders belirtilmemiş"}
+                                  </p>
+                                  <p className="text-xs text-slate-600 mt-1">
+                                    {apt.reason}
+                                  </p>
+                                  <p className="text-xs text-slate-600">
+                                    {new Date(apt.date).toLocaleDateString("tr-TR")} - {apt.time}
+                                  </p>
+                                  <span className="inline-block mt-2 px-2 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded">
+                                    Onaylandı
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Reddedilen Randevular */}
+                      {appointments.filter(apt => apt.status === "rejected").length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-700 mb-2">
+                            Reddedilen ({appointments.filter(apt => apt.status === "rejected").length})
+                          </h3>
+                          <div className="space-y-2">
+                            {appointments
+                              .filter(apt => apt.status === "rejected")
+                              .map((apt) => (
+                                <div
+                                  key={apt.id}
+                                  className="border border-slate-200 rounded-lg p-3 bg-red-50"
+                                >
+                                  <p className="font-semibold text-slate-900 text-sm">
+                                    {apt.course || "Ders belirtilmemiş"}
+                                  </p>
+                                  <p className="text-xs text-slate-600 mt-1">
+                                    {apt.reason}
+                                  </p>
+                                  <p className="text-xs text-slate-600">
+                                    {new Date(apt.date).toLocaleDateString("tr-TR")} - {apt.time}
+                                  </p>
+                                  {apt.rejectionReason && (
+                                    <div className="mt-2 p-2 bg-red-100 border border-red-200 rounded text-xs">
+                                      <p className="font-semibold text-red-800 mb-1">
+                                        Reddetme Sebebi:
+                                      </p>
+                                      <p className="text-red-700">
+                                        {apt.rejectionReason}
+                                      </p>
+                                    </div>
+                                  )}
+                                  <span className="inline-block mt-2 px-2 py-1 bg-red-100 text-red-800 text-xs font-semibold rounded">
+                                    Reddedildi
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );

@@ -9,7 +9,7 @@ namespace ApiProject.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Roles = "Student,AcademicStaff")]
 public class NotificationController : ControllerBase
 {
     private readonly INotificationService _notificationService;
